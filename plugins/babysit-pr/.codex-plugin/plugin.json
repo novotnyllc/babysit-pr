@@ -1,0 +1,42 @@
+{
+  "name": "babysit-pr",
+  "version": "1.0.0",
+  "description": "Watch GitHub pull requests for review comments, CI failures, and mergeability changes.",
+  "author": {
+    "name": "Novotny LLC",
+    "url": "https://github.com/novotnyllc"
+  },
+  "homepage": "https://github.com/novotnyllc/babysit-pr",
+  "repository": "https://github.com/novotnyllc/babysit-pr",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "pull-requests",
+    "ci",
+    "reviews",
+    "codex",
+    "claude"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "PR Babysitter",
+    "shortDescription": "Watch PR comments, CI, and mergeability",
+    "longDescription": "Use PR Babysitter to keep monitoring an open GitHub pull request, surface new review feedback, diagnose CI failures, and continue polling until the PR closes or needs human help.",
+    "developerName": "Novotny LLC",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/novotnyllc/babysit-pr",
+    "privacyPolicyURL": "https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement",
+    "termsOfServiceURL": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+    "defaultPrompt": [
+      "Babysit the current PR until it closes or needs help.",
+      "Watch this PR for CI failures and review feedback.",
+      "Monitor the PR and fix actionable review comments."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

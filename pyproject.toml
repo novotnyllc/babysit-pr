@@ -1,0 +1,2 @@
+[tool.pytest.ini_options]
+testpaths = ["plugins/babysit-pr/skills/babysit-pr/scripts"]

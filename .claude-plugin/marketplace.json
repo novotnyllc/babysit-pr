@@ -1,0 +1,24 @@
+{
+  "name": "babysit-pr",
+  "owner": {
+    "name": "Novotny LLC",
+    "url": "https://github.com/novotnyllc"
+  },
+  "metadata": {
+    "description": "Marketplace hosting the PR Babysitter plugin."
+  },
+  "plugins": [
+    {
+      "name": "babysit-pr",
+      "description": "Watch GitHub pull requests for review comments, CI failures, and mergeability changes.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Novotny LLC",
+        "url": "https://github.com/novotnyllc"
+      },
+      "source": "./plugins/babysit-pr",
+      "category": "productivity",
+      "homepage": "https://github.com/novotnyllc/babysit-pr"
+    }
+  ]
+}
