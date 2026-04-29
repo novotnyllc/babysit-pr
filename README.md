@@ -17,7 +17,7 @@ Local changes include packaging the skill as a standalone marketplace plugin and
 
 ## Upstream updates
 
-The weekly `Upstream Sync` GitHub Actions workflow checks `openai/codex` for changes under `.codex/skills/babysit-pr`. When upstream changes are available, it applies the upstream diff onto `plugins/babysit-pr/skills/babysit-pr`, updates the recorded upstream commit, runs the watcher tests, and opens a pull request.
+The weekly `Upstream Sync` GitHub Actions workflow checks `openai/codex` for changes under `.codex/skills/babysit-pr`. When upstream changes are available, it applies the upstream diff onto `plugins/babysit-pr/skills/babysit-pr`, updates the recorded upstream commit, bumps the plugin patch version, runs the watcher tests, opens a pull request, and enables auto-merge.
 
 You can run the same check locally:
 

@@ -43,8 +43,10 @@ jobs:
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             commit="$(python3 -c 'import json; print(json.load(open(".upstream/babysit-pr.json"))["upstream_commit"])')"
+            version="$(python3 -c 'import json; print(json.load(open("plugins/babysit-pr/.codex-plugin/plugin.json"))["version"])')"
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "commit=$commit" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
@@ -70,11 +72,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BEFORE_COMMIT: ${{ steps.before.outputs.commit }}
           AFTER_COMMIT: ${{ steps.changes.outputs.commit }}
+          VERSION: ${{ steps.changes.outputs.version }}
         run: |
           branch="sync/openai-codex-babysit-pr-${AFTER_COMMIT:0:12}"
           git switch -c "$branch"
-          git add .upstream/babysit-pr.json README.md NOTICE plugins/babysit-pr/skills/babysit-pr
-          git commit -m "chore: sync upstream babysit-pr skill"
+          git add .upstream/babysit-pr.json README.md NOTICE .claude-plugin/marketplace.json plugins/babysit-pr
+          git commit -m "chore: sync upstream babysit-pr skill to v$VERSION"
           git push --force-with-lease origin "$branch"
 
           body="$(mktemp)"
@@ -84,6 +87,7 @@ jobs:
           - Upstream path: \`.codex/skills/babysit-pr\`
           - Previous upstream commit: \`$BEFORE_COMMIT\`
           - New upstream commit: \`$AFTER_COMMIT\`
+          - Plugin version: \`$VERSION\`
 
           The workflow applies the upstream diff onto this repo's plugin path instead of copying files wholesale, so local packaging changes and review-bot fixes remain explicit.
 
@@ -94,6 +98,9 @@ jobs:
 
           if gh pr view "$branch" --json number >/dev/null 2>&1; then
             gh pr edit "$branch" --title "Sync upstream babysit-pr skill" --body-file "$body"
+            pr_url="$(gh pr view "$branch" --json url --jq .url)"
           else
-            gh pr create --title "Sync upstream babysit-pr skill" --body-file "$body" --base main --head "$branch"
+            pr_url="$(gh pr create --title "Sync upstream babysit-pr skill" --body-file "$body" --base main --head "$branch")"
           fi
+
+          gh pr merge "$pr_url" --auto --squash --delete-branch --match-head-commit "$(git rev-parse HEAD)"

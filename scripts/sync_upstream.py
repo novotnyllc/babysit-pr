@@ -16,6 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 METADATA_PATH = REPO_ROOT / ".upstream" / "babysit-pr.json"
 README_PATH = REPO_ROOT / "README.md"
 NOTICE_PATH = REPO_ROOT / "NOTICE"
+VERSIONED_JSON_PATHS = (
+    REPO_ROOT / "plugins" / "babysit-pr" / ".codex-plugin" / "plugin.json",
+    REPO_ROOT / "plugins" / "babysit-pr" / ".claude-plugin" / "plugin.json",
+    REPO_ROOT / ".claude-plugin" / "marketplace.json",
+)
 
 
 def run(cmd: list[str], cwd: Path = REPO_ROOT, *, capture: bool = False) -> str:
@@ -75,6 +80,32 @@ def replace_commit_references(old_commit: str, new_commit: str) -> None:
         path.write_text(updated, encoding="utf-8")
 
 
+def bump_patch_version(version: str) -> str:
+    parts = version.split(".")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        raise RuntimeError(f"Expected semantic version MAJOR.MINOR.PATCH, got {version!r}")
+    parts[2] = str(int(parts[2]) + 1)
+    return ".".join(parts)
+
+
+def bump_versions() -> str:
+    plugin_manifest = json.loads(VERSIONED_JSON_PATHS[0].read_text(encoding="utf-8"))
+    old_version = str(plugin_manifest["version"])
+    new_version = bump_patch_version(old_version)
+
+    for path in VERSIONED_JSON_PATHS[:2]:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["version"] = new_version
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    marketplace = json.loads(VERSIONED_JSON_PATHS[2].read_text(encoding="utf-8"))
+    for plugin in marketplace.get("plugins", []):
+        if plugin.get("name") == "babysit-pr":
+            plugin["version"] = new_version
+    VERSIONED_JSON_PATHS[2].write_text(json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+    return new_version
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -128,7 +159,9 @@ def main() -> int:
         metadata["upstream_commit"] = new_commit
         METADATA_PATH.write_text(json.dumps(metadata, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         replace_commit_references(old_commit, new_commit)
+        new_version = bump_versions()
         print(f"Applied upstream changes: {old_commit}..{new_commit}")
+        print(f"Bumped plugin version to {new_version}")
         return 0
 
 
