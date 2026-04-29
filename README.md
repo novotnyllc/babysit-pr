@@ -15,6 +15,16 @@ This work is derived from `openai/codex`:
 
 Local changes include packaging the skill as a standalone marketplace plugin and fixing GitHub issue #19148 so reviews from `copilot-pull-request-reviewer` are surfaced even though that account does not use a `[bot]` suffix.
 
+## Upstream updates
+
+The weekly `Upstream Sync` GitHub Actions workflow checks `openai/codex` for changes under `.codex/skills/babysit-pr`. When upstream changes are available, it applies the upstream diff onto `plugins/babysit-pr/skills/babysit-pr`, updates the recorded upstream commit, runs the watcher tests, and opens a pull request.
+
+You can run the same check locally:
+
+```bash
+python3 scripts/sync_upstream.py --check
+```
+
 ## Install
 
 Codex can add this repository as a plugin marketplace:

@@ -1,0 +1,7 @@
+{
+  "upstream_repo": "https://github.com/openai/codex.git",
+  "upstream_ref": "main",
+  "upstream_path": ".codex/skills/babysit-pr",
+  "local_path": "plugins/babysit-pr/skills/babysit-pr",
+  "upstream_commit": "70ac0f123c4b1869c9069d5b34e367b96c28bfad"
+}

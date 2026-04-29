@@ -1,0 +1,99 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    - cron: "23 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Read current upstream commit
+        id: before
+        run: |
+          commit="$(python3 -c 'import json; print(json.load(open(".upstream/babysit-pr.json"))["upstream_commit"])')"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Apply upstream changes
+        run: python3 scripts/sync_upstream.py
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            commit="$(python3 -c 'import json; print(json.load(open(".upstream/babysit-pr.json"))["upstream_commit"])')"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate JSON manifests
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python3 -m json.tool .upstream/babysit-pr.json >/dev/null
+          python3 -m json.tool .agents/plugins/marketplace.json >/dev/null
+          python3 -m json.tool .claude-plugin/marketplace.json >/dev/null
+          python3 -m json.tool plugins/babysit-pr/.codex-plugin/plugin.json >/dev/null
+          python3 -m json.tool plugins/babysit-pr/.claude-plugin/plugin.json >/dev/null
+
+      - name: Run tests
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python3 -m pip install --upgrade pip pytest
+          python3 -m pytest plugins/babysit-pr/skills/babysit-pr/scripts
+
+      - name: Create pull request
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE_COMMIT: ${{ steps.before.outputs.commit }}
+          AFTER_COMMIT: ${{ steps.changes.outputs.commit }}
+        run: |
+          branch="sync/openai-codex-babysit-pr-${AFTER_COMMIT:0:12}"
+          git switch -c "$branch"
+          git add .upstream/babysit-pr.json README.md NOTICE plugins/babysit-pr/skills/babysit-pr
+          git commit -m "chore: sync upstream babysit-pr skill"
+          git push --force-with-lease origin "$branch"
+
+          body="$(mktemp)"
+          cat > "$body" <<EOF
+          Updates the standalone plugin with upstream changes from \`openai/codex\`.
+
+          - Upstream path: \`.codex/skills/babysit-pr\`
+          - Previous upstream commit: \`$BEFORE_COMMIT\`
+          - New upstream commit: \`$AFTER_COMMIT\`
+
+          The workflow applies the upstream diff onto this repo's plugin path instead of copying files wholesale, so local packaging changes and review-bot fixes remain explicit.
+
+          Validation:
+          - JSON manifests parsed
+          - Python watcher tests passed
+          EOF
+
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            gh pr edit "$branch" --title "Sync upstream babysit-pr skill" --body-file "$body"
+          else
+            gh pr create --title "Sync upstream babysit-pr skill" --body-file "$body" --base main --head "$branch"
+          fi
