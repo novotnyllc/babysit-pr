@@ -118,8 +118,12 @@ def test_actionable_review_bot_login_allows_copilot_without_bot_suffix():
 
 
 def test_actionable_review_bot_login_allows_known_review_automation_accounts():
+    assert gh_pr_watch.is_actionable_review_bot_login("bugbot[bot]")
     assert gh_pr_watch.is_actionable_review_bot_login("claude[bot]")
     assert gh_pr_watch.is_actionable_review_bot_login("coderabbitai")
+    assert gh_pr_watch.is_actionable_review_bot_login("cursor[bot]")
+    assert gh_pr_watch.is_actionable_review_bot_login("gemini-code-assist[bot]")
+    assert gh_pr_watch.is_actionable_review_bot_login("sourcery-ai[bot]")
 
 
 def test_fetch_new_review_items_surfaces_copilot_review_with_none_association(monkeypatch):

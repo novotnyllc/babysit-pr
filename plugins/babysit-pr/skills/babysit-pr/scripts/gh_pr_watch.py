@@ -31,9 +31,13 @@ REVIEW_BOT_LOGIN_KEYWORDS = {
     "codex",
 }
 REVIEW_AUTOMATION_LOGINS = {
+    "bugbot",
     "claude",
     "copilot-pull-request-reviewer",
     "coderabbitai",
+    "cursor",
+    "gemini-code-assist",
+    "sourcery-ai",
 }
 TRUSTED_AUTHOR_ASSOCIATIONS = {
     "OWNER",
