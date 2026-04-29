@@ -1,5 +1,6 @@
 import argparse
 import importlib.util
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -116,6 +117,11 @@ def test_actionable_review_bot_login_allows_copilot_without_bot_suffix():
     assert gh_pr_watch.is_actionable_review_bot_login("copilot-pull-request-reviewer")
 
 
+def test_actionable_review_bot_login_allows_known_review_automation_accounts():
+    assert gh_pr_watch.is_actionable_review_bot_login("claude[bot]")
+    assert gh_pr_watch.is_actionable_review_bot_login("coderabbitai")
+
+
 def test_fetch_new_review_items_surfaces_copilot_review_with_none_association(monkeypatch):
     pr = sample_pr()
     review_payload = [
@@ -207,7 +213,7 @@ def test_run_watch_keeps_polling_open_ready_to_merge_pr(monkeypatch):
     monkeypatch.setattr(
         gh_pr_watch,
         "collect_snapshot",
-        lambda args: (snapshot, Path("/tmp/codex-babysit-pr-state.json")),
+        lambda args: (snapshot, Path(tempfile.gettempdir()) / "codex-babysit-pr-state.json"),
     )
     monkeypatch.setattr(
         gh_pr_watch,

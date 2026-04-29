@@ -33,7 +33,7 @@ claude plugin install babysit-pr@babysit-pr
 For local testing before publishing:
 
 ```bash
-claude plugin marketplace add /Volumes/Data/Users/claire/dev/babysit-pr
+claude plugin marketplace add .
 claude plugin install babysit-pr@babysit-pr
 ```
 
