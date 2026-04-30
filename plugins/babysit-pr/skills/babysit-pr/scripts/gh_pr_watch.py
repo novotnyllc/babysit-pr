@@ -521,6 +521,12 @@ def has_pending_copilot_review(requested_reviewers):
     return any(is_copilot_reviewer_login(login) for login in requested_reviewer_logins(requested_reviewers))
 
 
+def is_copilot_review_pending_or_unknown(copilot_review):
+    if not copilot_review:
+        return False
+    return bool(copilot_review.get("pending") or copilot_review.get("pending_unknown"))
+
+
 def is_permanent_copilot_request_error(message):
     lower_message = str(message or "").lower()
     return any(
@@ -774,7 +780,7 @@ def unique_actions(actions):
 def is_pr_ready_to_merge(pr, checks_summary, new_review_items, copilot_review=None):
     if pr["closed"] or pr["merged"]:
         return False
-    if copilot_review and copilot_review.get("pending"):
+    if is_copilot_review_pending_or_unknown(copilot_review):
         return False
     if not checks_summary["all_terminal"]:
         return False
@@ -814,7 +820,7 @@ def recommend_actions(
     if new_review_items:
         actions.append("process_review_comment")
 
-    if copilot_review and copilot_review.get("pending"):
+    if is_copilot_review_pending_or_unknown(copilot_review):
         actions.append("wait_for_copilot_review")
 
     has_failed_pr_checks = checks_summary["failed_count"] > 0

@@ -336,12 +336,35 @@ def test_recommend_actions_waits_for_pending_copilot_review():
     assert actions == ["wait_for_copilot_review"]
 
 
+def test_recommend_actions_waits_for_unknown_copilot_review_status():
+    actions = gh_pr_watch.recommend_actions(
+        sample_pr(),
+        sample_checks(),
+        [],
+        [],
+        0,
+        3,
+        copilot_review=sample_copilot_review(pending_unknown=True),
+    )
+
+    assert actions == ["wait_for_copilot_review"]
+
+
 def test_pending_copilot_review_blocks_ready_to_merge():
     assert not gh_pr_watch.is_pr_ready_to_merge(
         sample_pr(),
         sample_checks(),
         [],
         copilot_review=sample_copilot_review(pending=True),
+    )
+
+
+def test_unknown_copilot_review_status_blocks_ready_to_merge():
+    assert not gh_pr_watch.is_pr_ready_to_merge(
+        sample_pr(),
+        sample_checks(),
+        [],
+        copilot_review=sample_copilot_review(pending_unknown=True),
     )
 
 
