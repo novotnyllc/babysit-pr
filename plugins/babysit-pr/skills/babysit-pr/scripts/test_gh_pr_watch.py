@@ -187,6 +187,7 @@ def test_has_pending_copilot_review_from_requested_reviewers():
 def test_permanent_copilot_request_error_classification():
     assert gh_pr_watch.is_permanent_copilot_request_error("reviewer not found")
     assert gh_pr_watch.is_permanent_copilot_request_error("Could not resolve to a user")
+    assert not gh_pr_watch.is_permanent_copilot_request_error("404 Not Found")
     assert not gh_pr_watch.is_permanent_copilot_request_error("network timeout")
 
 
@@ -221,6 +222,35 @@ def test_request_copilot_review_records_success_and_pending_reviewer(monkeypatch
     assert status["pending"] is True
     assert status["requested_reviewers_confirmed"] is True
     assert state["copilot_review"]["head_sha"] == "abc123"
+
+
+def test_pending_copilot_review_clears_stale_retry_fields():
+    pr = sample_pr()
+    state = {
+        "copilot_review": {
+            "head_sha": "abc123",
+            "request_attempted": False,
+            "request_succeeded": False,
+            "request_unavailable": False,
+            "request_retryable": True,
+            "request_error": "network timeout",
+            "last_request_attempt_at": 1000,
+            "request_retry_after": 1300,
+        }
+    }
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [{"login": "Copilot"}], "teams": []},
+    )
+
+    assert status["request_succeeded"] is True
+    assert status["request_retryable"] is False
+    assert status["last_request_attempt_at"] is None
+    assert status["request_retry_after"] is None
+    assert state["copilot_review"]["last_request_attempt_at"] is None
+    assert state["copilot_review"]["request_retry_after"] is None
 
 
 def test_request_copilot_review_records_confirmed_nonpending_followup(monkeypatch):

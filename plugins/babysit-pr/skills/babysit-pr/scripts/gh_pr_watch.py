@@ -49,7 +49,6 @@ COPILOT_REVIEWER_LOGINS = {
 COPILOT_REVIEW_REQUEST_RETRY_SECONDS = 300
 PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS = {
     "could not resolve to a user",
-    "not found",
     "not a collaborator",
     "review cannot be requested",
     "reviewer not found",
@@ -598,6 +597,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             request_unavailable=False,
             request_retryable=False,
             request_error=None,
+            last_request_attempt_at=None,
+            request_retry_after=None,
         )
         status.update(
             {
@@ -606,6 +607,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_unavailable": False,
                 "request_retryable": False,
                 "request_error": None,
+                "last_request_attempt_at": None,
+                "request_retry_after": None,
                 "requested_reviewers_confirmed": True,
             }
         )
@@ -908,6 +911,8 @@ def collect_snapshot(args):
             and previously_requested_for_sha
         ):
             copilot_review["pending_unknown"] = True
+    elif not copilot_review.get("pending_unknown"):
+        copilot_review["requested_reviewers_confirmed"] = True
     authenticated_login = get_authenticated_login()
     new_review_items = fetch_new_review_items(
         pr,
