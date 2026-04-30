@@ -221,6 +221,32 @@ def test_request_copilot_review_tolerates_unavailable_reviewer(monkeypatch):
     assert state["copilot_review"]["request_unavailable"] is True
 
 
+def test_request_copilot_review_tolerates_failed_followup_status(monkeypatch):
+    pr = sample_pr()
+    state = {}
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", lambda *args, **kwargs: "")
+
+    def fake_get_requested_reviewers(repo, pr_number):
+        raise gh_pr_watch.GhCommandError("temporary API error")
+
+    monkeypatch.setattr(gh_pr_watch, "get_requested_reviewers", fake_get_requested_reviewers)
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_attempted"] is True
+    assert status["request_succeeded"] is True
+    assert status["request_unavailable"] is False
+    assert status["pending"] is False
+    assert status["pending_unknown"] is True
+    assert "temporary API error" in status["request_error"]
+    assert state["copilot_review"]["request_succeeded"] is True
+
+
 def test_request_copilot_review_does_not_retry_same_sha(monkeypatch):
     pr = sample_pr()
     state = {

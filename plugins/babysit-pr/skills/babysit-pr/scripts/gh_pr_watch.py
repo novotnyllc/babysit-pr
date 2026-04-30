@@ -544,6 +544,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         "request_succeeded": bool(existing.get("request_succeeded")),
         "request_unavailable": bool(existing.get("request_unavailable")),
         "request_error": existing.get("request_error"),
+        "pending_unknown": False,
         "pending": pending,
         "requested_reviewer_logins": requested_reviewer_logins(requested_reviewers),
     }
@@ -597,7 +598,29 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         )
         return status
 
-    updated_requested_reviewers = get_requested_reviewers(pr["repo"], pr["number"])
+    try:
+        updated_requested_reviewers = get_requested_reviewers(pr["repo"], pr["number"])
+    except GhCommandError as err:
+        _set_copilot_review_state(
+            state,
+            head_sha,
+            request_attempted=True,
+            request_succeeded=True,
+            request_unavailable=False,
+            request_error=str(err),
+        )
+        status.update(
+            {
+                "request_attempted": True,
+                "request_succeeded": True,
+                "request_unavailable": False,
+                "request_error": str(err),
+                "pending": False,
+                "pending_unknown": True,
+            }
+        )
+        return status
+
     updated_pending = has_pending_copilot_review(updated_requested_reviewers)
     _set_copilot_review_state(
         state,
