@@ -25,19 +25,21 @@ Accept any of the following:
 
 1. When the user asks to "monitor"/"watch"/"babysit" a PR, start with the watcher's continuous mode (`--watch`) unless you are intentionally doing a one-shot diagnostic snapshot.
 2. Run the watcher script to snapshot PR/review/CI state (or consume each streamed snapshot from `--watch`).
-3. Inspect the `actions` list in the JSON response.
-4. If `diagnose_ci_failure` is present, inspect failed run logs and classify the failure.
-5. If the failure is likely caused by the current branch, patch code locally, commit, and push.
-6. If `process_review_comment` is present, inspect surfaced review items and decide whether to address them.
-7. If a review item is actionable and correct, patch code locally, commit, push, and then mark the associated review thread/comment as resolved once the fix is on GitHub.
-8. If a review item from another author is non-actionable, already addressed, or not valid, post one reply on the comment/thread explaining that decision (for example answering the question or explaining why no change is needed). Prefix the GitHub reply body with `[codex]` so it is clear the response is automated. If the watcher later surfaces your own reply, treat that self-authored item as already handled and do not reply again.
-9. If the failure is likely flaky/unrelated and `retry_failed_checks` is present, rerun failed jobs with `--retry-failed-now`.
-10. If both actionable review feedback and `retry_failed_checks` are present, prioritize review feedback first; a new commit will retrigger CI, so avoid rerunning flaky checks on the old SHA unless you intentionally defer the review change.
-11. On every loop, look for newly surfaced review feedback before acting on CI failures or mergeability state, then verify mergeability / merge-conflict status (for example via `gh pr view`) alongside CI.
-12. After any push or rerun action, immediately return to step 1 and continue polling on the updated SHA/state.
-13. If you had been using `--watch` before pausing to patch/commit/push, relaunch `--watch` yourself in the same turn immediately after the push (do not wait for the user to re-invoke the skill).
-14. Repeat polling until `stop_pr_closed` appears or a user-help-required blocker is reached. A green + review-clean + mergeable PR is a progress milestone, not a reason to stop the watcher while the PR is still open.
-15. Maintain terminal/session ownership: while babysitting is active, keep consuming watcher output in the same turn; do not leave a detached `--watch` process running and then end the turn as if monitoring were complete.
+3. Let the watcher request a Copilot review when GitHub accepts it. Copilot may be unavailable for the repo/user; that is non-fatal and should not block the PR by itself.
+4. If `wait_for_copilot_review` is present, do not merge yet. Continue polling until the Copilot requested reviewer is gone, then inspect any newly surfaced Copilot feedback before proceeding.
+5. Inspect the `actions` list in the JSON response.
+6. If `diagnose_ci_failure` is present, inspect failed run logs and classify the failure.
+7. If the failure is likely caused by the current branch, patch code locally, commit, and push.
+8. If `process_review_comment` is present, inspect surfaced review items and decide whether to address them.
+9. If a review item is actionable and correct, patch code locally, commit, push, and then mark the associated review thread/comment as resolved once the fix is on GitHub.
+10. If a review item from another author is non-actionable, already addressed, or not valid, post one reply on the comment/thread explaining that decision (for example answering the question or explaining why no change is needed). Prefix the GitHub reply body with `[codex]` so it is clear the response is automated. If the watcher later surfaces your own reply, treat that self-authored item as already handled and do not reply again.
+11. If the failure is likely flaky/unrelated and `retry_failed_checks` is present, rerun failed jobs with `--retry-failed-now`.
+12. If both actionable review feedback and `retry_failed_checks` are present, prioritize review feedback first; a new commit will retrigger CI, so avoid rerunning flaky checks on the old SHA unless you intentionally defer the review change.
+13. On every loop, look for newly surfaced review feedback before acting on CI failures or mergeability state, then verify mergeability / merge-conflict status (for example via `gh pr view`) alongside CI.
+14. After any push or rerun action, immediately return to step 1 and continue polling on the updated SHA/state.
+15. If you had been using `--watch` before pausing to patch/commit/push, relaunch `--watch` yourself in the same turn immediately after the push (do not wait for the user to re-invoke the skill).
+16. Repeat polling until `stop_pr_closed` appears or a user-help-required blocker is reached. A green + review-clean + mergeable PR is a progress milestone, not a reason to stop the watcher while the PR is still open.
+17. Maintain terminal/session ownership: while babysitting is active, keep consuming watcher output in the same turn; do not leave a detached `--watch` process running and then end the turn as if monitoring were complete.
 
 ## Commands
 
@@ -89,6 +91,7 @@ The watcher surfaces review items from:
 It intentionally surfaces Codex reviewer bot feedback (for example comments/reviews from `chatgpt-codex-connector[bot]`) in addition to human reviewer feedback. Most unrelated bot noise should still be ignored.
 For safety, the watcher only auto-surfaces trusted human review authors (for example repo OWNER/MEMBER/COLLABORATOR, plus the authenticated operator) and approved review bots such as Codex.
 On a fresh watcher state file, existing pending review feedback may be surfaced immediately (not only comments that arrive after monitoring starts). This is intentional so already-open review comments are not missed.
+The watcher also makes one best-effort Copilot review request per PR head SHA. If GitHub reports `Copilot` as a requested reviewer, treat that as an in-progress Copilot review and keep polling until it completes. After completion, inspect surfaced Copilot review comments/reviews before calling the PR ready to merge.
 
 When you agree with a comment and it is actionable:
 
@@ -127,13 +130,14 @@ Use this loop in a live Codex session:
 4. Check CI summary, new review items, and mergeability/conflict status.
 5. Diagnose CI failures and classify branch-related vs flaky/unrelated.
 6. For each surfaced review item from another author, either reply once with an explanation if it is non-actionable or patch/commit/push and then resolve it if it is actionable. If a later snapshot surfaces your own reply, treat it as informational and continue without responding again.
-7. Process actionable review comments before flaky reruns when both are present; if a review fix requires a commit, push it and skip rerunning failed checks on the old SHA.
-8. Retry failed checks only when `retry_failed_checks` is present and you are not about to replace the current SHA with a review/CI fix commit.
-9. If you pushed a commit, resolved a review thread, replied to a review comment, or triggered a rerun, report the action briefly and continue polling (do not stop).
-10. After a review-fix push, proactively restart continuous monitoring (`--watch`) in the same turn unless a strict stop condition has already been reached.
-11. If everything is passing, mergeable, not blocked on required review approval, and there are no unaddressed review items, report that the PR is currently ready to merge but keep the watcher running so new review comments are surfaced quickly while the PR remains open.
-12. If blocked on a user-help-required issue (infra outage, exhausted flaky retries, unclear reviewer request, permissions), report the blocker and stop.
-13. Otherwise sleep according to the polling cadence below and repeat.
+7. If `wait_for_copilot_review` is present, continue polling and do not merge. Once Copilot is no longer requested, process any new Copilot feedback before moving on.
+8. Process actionable review comments before flaky reruns when both are present; if a review fix requires a commit, push it and skip rerunning failed checks on the old SHA.
+9. Retry failed checks only when `retry_failed_checks` is present and you are not about to replace the current SHA with a review/CI fix commit.
+10. If you pushed a commit, resolved a review thread, replied to a review comment, or triggered a rerun, report the action briefly and continue polling (do not stop).
+11. After a review-fix push, proactively restart continuous monitoring (`--watch`) in the same turn unless a strict stop condition has already been reached.
+12. If everything is passing, mergeable, not blocked on required review approval, Copilot is not in progress, and there are no unaddressed review items, report that the PR is currently ready to merge but keep the watcher running so new review comments are surfaced quickly while the PR remains open.
+13. If blocked on a user-help-required issue (infra outage, exhausted flaky retries, unclear reviewer request, permissions), report the blocker and stop.
+14. Otherwise sleep according to the polling cadence below and repeat.
 
 When the user explicitly asks to monitor/watch/babysit a PR, prefer `--watch` so polling continues autonomously in one command. Use repeated `--once` snapshots only for debugging, local testing, or when the user explicitly asks for a one-shot check.
 Do not stop to ask the user whether to continue polling; continue autonomously until a strict stop condition is met or the user explicitly interrupts.
@@ -161,6 +165,7 @@ Keep polling when:
 - CI is still running/queued.
 - Review state is quiet but CI is not terminal.
 - CI is green but mergeability is unknown/pending.
+- Copilot review is requested/in progress.
 - CI is green and mergeable, but the PR is still open and you are waiting for possible new review comments or merge-conflict changes.
 - The PR is green but blocked on review approval (`REVIEW_REQUIRED` / similar); continue polling at the base cadence and surface any new review comments without asking for confirmation to keep watching.
 

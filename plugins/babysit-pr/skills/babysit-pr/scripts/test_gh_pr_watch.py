@@ -40,6 +40,20 @@ def sample_checks(**overrides):
     return checks
 
 
+def sample_copilot_review(**overrides):
+    review = {
+        "requester": "Copilot",
+        "request_attempted": True,
+        "request_succeeded": True,
+        "request_unavailable": False,
+        "request_error": None,
+        "pending": False,
+        "requested_reviewer_logins": [],
+    }
+    review.update(overrides)
+    return review
+
+
 def test_collect_snapshot_fetches_review_items_before_ci(monkeypatch, tmp_path):
     call_order = []
     pr = sample_pr()
@@ -50,6 +64,16 @@ def test_collect_snapshot_fetches_review_items_before_ci(monkeypatch, tmp_path):
         gh_pr_watch,
         "get_authenticated_login",
         lambda: call_order.append("auth") or "octocat",
+    )
+    monkeypatch.setattr(
+        gh_pr_watch,
+        "get_requested_reviewers",
+        lambda *args, **kwargs: call_order.append("requested_reviewers") or {"users": [], "teams": []},
+    )
+    monkeypatch.setattr(
+        gh_pr_watch,
+        "request_copilot_review_if_possible",
+        lambda *args, **kwargs: call_order.append("copilot") or sample_copilot_review(),
     )
     monkeypatch.setattr(
         gh_pr_watch,
@@ -96,6 +120,15 @@ def test_collect_snapshot_fetches_review_items_before_ci(monkeypatch, tmp_path):
     assert call_order.index("review") < call_order.index("workflow")
 
 
+def test_get_pr_checks_treats_no_checks_as_empty(monkeypatch):
+    def fake_gh_json(args, repo=None):
+        raise gh_pr_watch.GhCommandError("stderr: no checks reported on the branch")
+
+    monkeypatch.setattr(gh_pr_watch, "gh_json", fake_gh_json)
+
+    assert gh_pr_watch.get_pr_checks("123", repo="openai/codex") == []
+
+
 def test_recommend_actions_prioritizes_review_comments():
     actions = gh_pr_watch.recommend_actions(
         sample_pr(),
@@ -111,6 +144,131 @@ def test_recommend_actions_prioritizes_review_comments():
         "diagnose_ci_failure",
         "retry_failed_checks",
     ]
+
+
+def test_requested_reviewer_logins_extracts_users_only():
+    requested_reviewers = {
+        "users": [{"login": "Copilot"}, {"login": "octocat"}, {"name": "missing-login"}],
+        "teams": [{"slug": "reviewers"}],
+    }
+
+    assert gh_pr_watch.requested_reviewer_logins(requested_reviewers) == [
+        "Copilot",
+        "octocat",
+    ]
+
+
+def test_has_pending_copilot_review_from_requested_reviewers():
+    assert gh_pr_watch.has_pending_copilot_review({"users": [{"login": "Copilot"}]})
+    assert gh_pr_watch.has_pending_copilot_review(
+        {"users": [{"login": "copilot-pull-request-reviewer[bot]"}]}
+    )
+    assert not gh_pr_watch.has_pending_copilot_review({"users": [{"login": "octocat"}]})
+
+
+def test_request_copilot_review_records_success_and_pending_reviewer(monkeypatch):
+    calls = []
+    pr = sample_pr()
+    state = {}
+
+    def fake_gh_text(args, repo=None):
+        calls.append((args, repo))
+        return ""
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+    monkeypatch.setattr(
+        gh_pr_watch,
+        "get_requested_reviewers",
+        lambda repo, pr_number: {"users": [{"login": "Copilot"}], "teams": []},
+    )
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert calls == [
+        (["pr", "edit", "123", "--add-reviewer", "Copilot"], "openai/codex")
+    ]
+    assert status["request_attempted"] is True
+    assert status["request_succeeded"] is True
+    assert status["request_unavailable"] is False
+    assert status["pending"] is True
+    assert state["copilot_review"]["head_sha"] == "abc123"
+
+
+def test_request_copilot_review_tolerates_unavailable_reviewer(monkeypatch):
+    pr = sample_pr()
+    state = {}
+
+    def fake_gh_text(args, repo=None):
+        raise gh_pr_watch.GhCommandError("reviewer not found")
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_attempted"] is True
+    assert status["request_succeeded"] is False
+    assert status["request_unavailable"] is True
+    assert "reviewer not found" in status["request_error"]
+    assert state["copilot_review"]["request_unavailable"] is True
+
+
+def test_request_copilot_review_does_not_retry_same_sha(monkeypatch):
+    pr = sample_pr()
+    state = {
+        "copilot_review": {
+            "head_sha": "abc123",
+            "request_attempted": True,
+            "request_succeeded": False,
+            "request_unavailable": True,
+            "request_error": "not enabled",
+        }
+    }
+
+    def fake_gh_text(args, repo=None):
+        raise AssertionError("should not retry a completed attempt for the same SHA")
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_attempted"] is True
+    assert status["request_unavailable"] is True
+    assert status["pending"] is False
+
+
+def test_recommend_actions_waits_for_pending_copilot_review():
+    actions = gh_pr_watch.recommend_actions(
+        sample_pr(),
+        sample_checks(),
+        [],
+        [],
+        0,
+        3,
+        copilot_review=sample_copilot_review(pending=True),
+    )
+
+    assert actions == ["wait_for_copilot_review"]
+
+
+def test_pending_copilot_review_blocks_ready_to_merge():
+    assert not gh_pr_watch.is_pr_ready_to_merge(
+        sample_pr(),
+        sample_checks(),
+        [],
+        copilot_review=sample_copilot_review(pending=True),
+    )
 
 
 def test_actionable_review_bot_login_allows_copilot_without_bot_suffix():
