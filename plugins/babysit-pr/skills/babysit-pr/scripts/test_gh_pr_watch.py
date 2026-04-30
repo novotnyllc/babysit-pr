@@ -445,6 +445,7 @@ def test_unknown_copilot_review_status_blocks_ready_to_merge():
 
 
 def test_actionable_review_bot_login_allows_copilot_without_bot_suffix():
+    assert gh_pr_watch.is_actionable_review_bot_login("Copilot")
     assert gh_pr_watch.is_actionable_review_bot_login("copilot-pull-request-reviewer")
 
 

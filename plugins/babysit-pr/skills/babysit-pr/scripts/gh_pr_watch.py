@@ -33,6 +33,7 @@ REVIEW_BOT_LOGIN_KEYWORDS = {
 REVIEW_AUTOMATION_LOGINS = {
     "bugbot",
     "claude",
+    "copilot",
     "copilot-pull-request-reviewer",
     "coderabbitai",
     "cursor",
