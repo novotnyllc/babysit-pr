@@ -50,7 +50,7 @@ Reruns only failed jobs (and dependencies) for a workflow run.
 - Requested reviewers:
   - `gh api repos/{owner}/{repo}/pulls/<pr_number>/requested_reviewers`
 
-If requested reviewers includes user login `Copilot`, treat Copilot review as requested/in progress and keep polling before merge.
+If requested reviewers includes a Copilot reviewer login, treat Copilot review as requested/in progress and keep polling before merge. Matching is case-insensitive and also recognizes `copilot-pull-request-reviewer[bot]` after stripping an optional `[bot]` suffix, not just `Copilot`.
 
 ## JSON fields consumed by the watcher
 

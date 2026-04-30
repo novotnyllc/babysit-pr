@@ -91,7 +91,7 @@ The watcher surfaces review items from:
 It intentionally surfaces Codex reviewer bot feedback (for example comments/reviews from `chatgpt-codex-connector[bot]`) in addition to human reviewer feedback. Most unrelated bot noise should still be ignored.
 For safety, the watcher only auto-surfaces trusted human review authors (for example repo OWNER/MEMBER/COLLABORATOR, plus the authenticated operator) and approved review bots such as Codex.
 On a fresh watcher state file, existing pending review feedback may be surfaced immediately (not only comments that arrive after monitoring starts). This is intentional so already-open review comments are not missed.
-The watcher also makes one best-effort Copilot review request per PR head SHA. If GitHub reports `Copilot` as a requested reviewer, treat that as an in-progress Copilot review and keep polling until it completes. After completion, inspect surfaced Copilot review comments/reviews before calling the PR ready to merge.
+The watcher also makes one best-effort Copilot review request per PR head SHA. If GitHub reports a Copilot requested reviewer (for example `Copilot` or `copilot-pull-request-reviewer[bot]`, including casing variations), treat that as an in-progress Copilot review and keep polling until it completes. After completion, inspect surfaced Copilot review comments/reviews before calling the PR ready to merge.
 
 When you agree with a comment and it is actionable:
 
