@@ -45,6 +45,7 @@ COPILOT_REVIEWER_LOGINS = {
     "copilot",
     "copilot-pull-request-reviewer",
 }
+COPILOT_REVIEW_REQUEST_RETRY_SECONDS = 300
 PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS = {
     "could not resolve to a user",
     "not found",
@@ -552,6 +553,8 @@ def _set_copilot_review_state(state, head_sha, **updates):
         "request_unavailable": False,
         "request_retryable": False,
         "request_error": None,
+        "last_request_attempt_at": None,
+        "request_retry_after": None,
     }
     current = state.get("copilot_review")
     if isinstance(current, dict) and str(current.get("head_sha") or "") == str(head_sha or ""):
@@ -574,6 +577,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         "request_unavailable": bool(existing.get("request_unavailable")),
         "request_retryable": bool(existing.get("request_retryable")),
         "request_error": existing.get("request_error"),
+        "last_request_attempt_at": existing.get("last_request_attempt_at"),
+        "request_retry_after": existing.get("request_retry_after"),
         "pending_unknown": False,
         "pending": pending,
         "requested_reviewer_logins": requested_reviewer_logins(requested_reviewers),
@@ -606,6 +611,16 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
     if status["request_attempted"]:
         return status
 
+    retry_after = status.get("request_retry_after")
+    try:
+        retry_after = int(retry_after)
+    except (TypeError, ValueError):
+        retry_after = 0
+    if status["request_retryable"] and retry_after > int(time.time()):
+        status["pending_unknown"] = True
+        return status
+
+    attempted_at = int(time.time())
     try:
         gh_text(
             ["pr", "edit", str(pr["number"]), "--add-reviewer", COPILOT_REVIEW_REQUEST_LOGIN],
@@ -621,6 +636,12 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             request_unavailable=permanent_failure,
             request_retryable=not permanent_failure,
             request_error=str(err),
+            last_request_attempt_at=attempted_at,
+            request_retry_after=(
+                None
+                if permanent_failure
+                else attempted_at + COPILOT_REVIEW_REQUEST_RETRY_SECONDS
+            ),
         )
         status.update(
             {
@@ -629,6 +650,13 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_unavailable": permanent_failure,
                 "request_retryable": not permanent_failure,
                 "request_error": str(err),
+                "last_request_attempt_at": attempted_at,
+                "request_retry_after": (
+                    None
+                    if permanent_failure
+                    else attempted_at + COPILOT_REVIEW_REQUEST_RETRY_SECONDS
+                ),
+                "pending_unknown": not permanent_failure,
             }
         )
         return status
@@ -644,6 +672,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             request_unavailable=False,
             request_retryable=False,
             request_error=str(err),
+            last_request_attempt_at=attempted_at,
+            request_retry_after=None,
         )
         status.update(
             {
@@ -652,6 +682,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_unavailable": False,
                 "request_retryable": False,
                 "request_error": str(err),
+                "last_request_attempt_at": attempted_at,
+                "request_retry_after": None,
                 "pending": False,
                 "pending_unknown": True,
             }
@@ -667,6 +699,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         request_unavailable=False,
         request_retryable=False,
         request_error=None,
+        last_request_attempt_at=attempted_at,
+        request_retry_after=None,
     )
     status.update(
         {
@@ -675,6 +709,8 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             "request_unavailable": False,
             "request_retryable": False,
             "request_error": None,
+            "last_request_attempt_at": attempted_at,
+            "request_retry_after": None,
             "pending": updated_pending,
             "requested_reviewer_logins": requested_reviewer_logins(updated_requested_reviewers),
         }
@@ -845,6 +881,7 @@ def collect_snapshot(args):
     if not state.get("started_at"):
         state["started_at"] = int(time.time())
 
+    prior_copilot_review = _copilot_review_state_for_sha(state, pr["head_sha"])
     requested_reviewers, requested_reviewers_error = get_requested_reviewers_best_effort(
         pr["repo"],
         pr["number"],
@@ -852,7 +889,15 @@ def collect_snapshot(args):
     copilot_review = request_copilot_review_if_possible(pr, state, requested_reviewers)
     if requested_reviewers_error:
         copilot_review["requested_reviewers_error"] = requested_reviewers_error
-        if not copilot_review.get("pending") and not copilot_review.get("request_succeeded"):
+        previously_requested_for_sha = bool(
+            copilot_review.get("request_succeeded")
+            or prior_copilot_review.get("request_succeeded")
+            or (
+                prior_copilot_review.get("request_attempted")
+                and not prior_copilot_review.get("request_unavailable")
+            )
+        )
+        if not copilot_review.get("pending") and previously_requested_for_sha:
             copilot_review["pending_unknown"] = True
     authenticated_login = get_authenticated_login()
     new_review_items = fetch_new_review_items(

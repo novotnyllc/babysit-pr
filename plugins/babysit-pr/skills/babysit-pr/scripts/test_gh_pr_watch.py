@@ -248,6 +248,8 @@ def test_request_copilot_review_allows_retry_after_transient_error(monkeypatch):
     pr = sample_pr()
     state = {}
 
+    monkeypatch.setattr(gh_pr_watch.time, "time", lambda: 1000)
+
     def fake_gh_text(args, repo=None):
         raise gh_pr_watch.GhCommandError("network timeout")
 
@@ -266,6 +268,80 @@ def test_request_copilot_review_allows_retry_after_transient_error(monkeypatch):
     assert "network timeout" in status["request_error"]
     assert state["copilot_review"]["request_attempted"] is False
     assert state["copilot_review"]["request_retryable"] is True
+    assert state["copilot_review"]["last_request_attempt_at"] == 1000
+    assert state["copilot_review"]["request_retry_after"] == 1300
+
+
+def test_request_copilot_review_defers_retry_until_retry_after(monkeypatch):
+    pr = sample_pr()
+    state = {
+        "copilot_review": {
+            "head_sha": "abc123",
+            "request_attempted": False,
+            "request_succeeded": False,
+            "request_unavailable": False,
+            "request_retryable": True,
+            "request_error": "network timeout",
+            "last_request_attempt_at": 1000,
+            "request_retry_after": 1300,
+        }
+    }
+
+    def fake_gh_text(args, repo=None):
+        raise AssertionError("should not retry before request_retry_after")
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+    monkeypatch.setattr(gh_pr_watch.time, "time", lambda: 1200)
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_retryable"] is True
+    assert status["pending_unknown"] is True
+
+
+def test_request_copilot_review_retries_after_retry_after(monkeypatch):
+    pr = sample_pr()
+    state = {
+        "copilot_review": {
+            "head_sha": "abc123",
+            "request_attempted": False,
+            "request_succeeded": False,
+            "request_unavailable": False,
+            "request_retryable": True,
+            "request_error": "network timeout",
+            "last_request_attempt_at": 1000,
+            "request_retry_after": 1300,
+        }
+    }
+    calls = []
+
+    def fake_gh_text(args, repo=None):
+        calls.append((args, repo))
+        return ""
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+    monkeypatch.setattr(gh_pr_watch.time, "time", lambda: 1400)
+    monkeypatch.setattr(
+        gh_pr_watch,
+        "get_requested_reviewers",
+        lambda repo, pr_number: {"users": [{"login": "Copilot"}], "teams": []},
+    )
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert calls == [
+        (["pr", "edit", "123", "--add-reviewer", "@copilot"], "openai/codex")
+    ]
+    assert status["request_succeeded"] is True
+    assert status["pending"] is True
 
 
 def test_request_copilot_review_tolerates_failed_followup_status(monkeypatch):
