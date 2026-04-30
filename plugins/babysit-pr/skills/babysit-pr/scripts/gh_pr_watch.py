@@ -373,6 +373,13 @@ def get_requested_reviewers(repo, pr_number):
     return data
 
 
+def get_requested_reviewers_best_effort(repo, pr_number):
+    try:
+        return get_requested_reviewers(repo, pr_number), None
+    except GhCommandError as err:
+        return {"users": [], "teams": []}, str(err)
+
+
 def comment_endpoints(repo, pr_number):
     return {
         "issue_comment": f"repos/{repo}/issues/{pr_number}/comments",
@@ -806,8 +813,15 @@ def collect_snapshot(args):
     if not state.get("started_at"):
         state["started_at"] = int(time.time())
 
-    requested_reviewers = get_requested_reviewers(pr["repo"], pr["number"])
+    requested_reviewers, requested_reviewers_error = get_requested_reviewers_best_effort(
+        pr["repo"],
+        pr["number"],
+    )
     copilot_review = request_copilot_review_if_possible(pr, state, requested_reviewers)
+    if requested_reviewers_error:
+        copilot_review["requested_reviewers_error"] = requested_reviewers_error
+        if not copilot_review.get("pending") and not copilot_review.get("request_succeeded"):
+            copilot_review["pending_unknown"] = True
     authenticated_login = get_authenticated_login()
     new_review_items = fetch_new_review_items(
         pr,

@@ -130,6 +130,21 @@ def test_get_pr_checks_treats_no_checks_as_empty(monkeypatch):
     assert gh_pr_watch.get_pr_checks("123", repo="openai/codex") == []
 
 
+def test_get_requested_reviewers_best_effort_returns_empty_on_api_error(monkeypatch):
+    def fake_get_requested_reviewers(repo, pr_number):
+        raise gh_pr_watch.GhCommandError("temporary requested reviewers failure")
+
+    monkeypatch.setattr(gh_pr_watch, "get_requested_reviewers", fake_get_requested_reviewers)
+
+    requested_reviewers, error = gh_pr_watch.get_requested_reviewers_best_effort(
+        "openai/codex",
+        123,
+    )
+
+    assert requested_reviewers == {"users": [], "teams": []}
+    assert "temporary requested reviewers failure" in error
+
+
 def test_recommend_actions_prioritizes_review_comments():
     actions = gh_pr_watch.recommend_actions(
         sample_pr(),
