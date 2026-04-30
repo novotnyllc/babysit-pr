@@ -49,6 +49,7 @@ def sample_copilot_review(**overrides):
         "request_unavailable": False,
         "request_retryable": False,
         "request_error": None,
+        "requested_reviewers_confirmed": True,
         "pending": False,
         "requested_reviewer_logins": [],
     }
@@ -218,7 +219,31 @@ def test_request_copilot_review_records_success_and_pending_reviewer(monkeypatch
     assert status["request_succeeded"] is True
     assert status["request_unavailable"] is False
     assert status["pending"] is True
+    assert status["requested_reviewers_confirmed"] is True
     assert state["copilot_review"]["head_sha"] == "abc123"
+
+
+def test_request_copilot_review_records_confirmed_nonpending_followup(monkeypatch):
+    pr = sample_pr()
+    state = {}
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", lambda *args, **kwargs: "")
+    monkeypatch.setattr(
+        gh_pr_watch,
+        "get_requested_reviewers",
+        lambda repo, pr_number: {"users": [], "teams": []},
+    )
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_succeeded"] is True
+    assert status["pending"] is False
+    assert status["pending_unknown"] is False
+    assert status["requested_reviewers_confirmed"] is True
 
 
 def test_request_copilot_review_tolerates_unavailable_reviewer(monkeypatch):
@@ -342,6 +367,7 @@ def test_request_copilot_review_retries_after_retry_after(monkeypatch):
     ]
     assert status["request_succeeded"] is True
     assert status["pending"] is True
+    assert status["requested_reviewers_confirmed"] is True
 
 
 def test_request_copilot_review_tolerates_failed_followup_status(monkeypatch):

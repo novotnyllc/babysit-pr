@@ -580,6 +580,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         "request_error": existing.get("request_error"),
         "last_request_attempt_at": existing.get("last_request_attempt_at"),
         "request_retry_after": existing.get("request_retry_after"),
+        "requested_reviewers_confirmed": False,
         "pending_unknown": False,
         "pending": pending,
         "requested_reviewer_logins": requested_reviewer_logins(requested_reviewers),
@@ -605,6 +606,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_unavailable": False,
                 "request_retryable": False,
                 "request_error": None,
+                "requested_reviewers_confirmed": True,
             }
         )
         return status
@@ -687,6 +689,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_retry_after": None,
                 "pending": False,
                 "pending_unknown": True,
+                "requested_reviewers_confirmed": False,
             }
         )
         return status
@@ -713,6 +716,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             "last_request_attempt_at": attempted_at,
             "request_retry_after": None,
             "pending": updated_pending,
+            "requested_reviewers_confirmed": True,
             "requested_reviewer_logins": requested_reviewer_logins(updated_requested_reviewers),
         }
     )
@@ -898,7 +902,11 @@ def collect_snapshot(args):
                 and not prior_copilot_review.get("request_unavailable")
             )
         )
-        if not copilot_review.get("pending") and previously_requested_for_sha:
+        if (
+            not copilot_review.get("pending")
+            and not copilot_review.get("requested_reviewers_confirmed")
+            and previously_requested_for_sha
+        ):
             copilot_review["pending_unknown"] = True
     authenticated_login = get_authenticated_login()
     new_review_items = fetch_new_review_items(
