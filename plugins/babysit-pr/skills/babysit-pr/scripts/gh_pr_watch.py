@@ -45,6 +45,13 @@ COPILOT_REVIEWER_LOGINS = {
     "copilot",
     "copilot-pull-request-reviewer",
 }
+PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS = {
+    "could not resolve to a user",
+    "not found",
+    "not a collaborator",
+    "review cannot be requested",
+    "reviewer not found",
+}
 TRUSTED_AUTHOR_ASSOCIATIONS = {
     "OWNER",
     "MEMBER",
@@ -514,6 +521,14 @@ def has_pending_copilot_review(requested_reviewers):
     return any(is_copilot_reviewer_login(login) for login in requested_reviewer_logins(requested_reviewers))
 
 
+def is_permanent_copilot_request_error(message):
+    lower_message = str(message or "").lower()
+    return any(
+        keyword in lower_message
+        for keyword in PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS
+    )
+
+
 def _copilot_review_state_for_sha(state, head_sha):
     record = state.get("copilot_review")
     if not isinstance(record, dict):
@@ -529,6 +544,7 @@ def _set_copilot_review_state(state, head_sha, **updates):
         "request_attempted": False,
         "request_succeeded": False,
         "request_unavailable": False,
+        "request_retryable": False,
         "request_error": None,
     }
     current = state.get("copilot_review")
@@ -550,6 +566,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         "request_attempted": bool(existing.get("request_attempted")),
         "request_succeeded": bool(existing.get("request_succeeded")),
         "request_unavailable": bool(existing.get("request_unavailable")),
+        "request_retryable": bool(existing.get("request_retryable")),
         "request_error": existing.get("request_error"),
         "pending_unknown": False,
         "pending": pending,
@@ -566,6 +583,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             request_attempted=True,
             request_succeeded=True,
             request_unavailable=False,
+            request_retryable=False,
             request_error=None,
         )
         status.update(
@@ -573,6 +591,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_attempted": True,
                 "request_succeeded": True,
                 "request_unavailable": False,
+                "request_retryable": False,
                 "request_error": None,
             }
         )
@@ -587,19 +606,22 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             repo=pr["repo"],
         )
     except GhCommandError as err:
+        permanent_failure = is_permanent_copilot_request_error(str(err))
         _set_copilot_review_state(
             state,
             head_sha,
-            request_attempted=True,
+            request_attempted=permanent_failure,
             request_succeeded=False,
-            request_unavailable=True,
+            request_unavailable=permanent_failure,
+            request_retryable=not permanent_failure,
             request_error=str(err),
         )
         status.update(
             {
                 "request_attempted": True,
                 "request_succeeded": False,
-                "request_unavailable": True,
+                "request_unavailable": permanent_failure,
+                "request_retryable": not permanent_failure,
                 "request_error": str(err),
             }
         )
@@ -614,6 +636,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             request_attempted=True,
             request_succeeded=True,
             request_unavailable=False,
+            request_retryable=False,
             request_error=str(err),
         )
         status.update(
@@ -621,6 +644,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
                 "request_attempted": True,
                 "request_succeeded": True,
                 "request_unavailable": False,
+                "request_retryable": False,
                 "request_error": str(err),
                 "pending": False,
                 "pending_unknown": True,
@@ -635,6 +659,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
         request_attempted=True,
         request_succeeded=True,
         request_unavailable=False,
+        request_retryable=False,
         request_error=None,
     )
     status.update(
@@ -642,6 +667,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
             "request_attempted": True,
             "request_succeeded": True,
             "request_unavailable": False,
+            "request_retryable": False,
             "request_error": None,
             "pending": updated_pending,
             "requested_reviewer_logins": requested_reviewer_logins(updated_requested_reviewers),

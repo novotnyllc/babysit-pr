@@ -47,6 +47,7 @@ def sample_copilot_review(**overrides):
         "request_attempted": True,
         "request_succeeded": True,
         "request_unavailable": False,
+        "request_retryable": False,
         "request_error": None,
         "pending": False,
         "requested_reviewer_logins": [],
@@ -182,6 +183,12 @@ def test_has_pending_copilot_review_from_requested_reviewers():
     assert not gh_pr_watch.has_pending_copilot_review({"users": [{"login": "octocat"}]})
 
 
+def test_permanent_copilot_request_error_classification():
+    assert gh_pr_watch.is_permanent_copilot_request_error("reviewer not found")
+    assert gh_pr_watch.is_permanent_copilot_request_error("Could not resolve to a user")
+    assert not gh_pr_watch.is_permanent_copilot_request_error("network timeout")
+
+
 def test_request_copilot_review_records_success_and_pending_reviewer(monkeypatch):
     calls = []
     pr = sample_pr()
@@ -232,8 +239,33 @@ def test_request_copilot_review_tolerates_unavailable_reviewer(monkeypatch):
     assert status["request_attempted"] is True
     assert status["request_succeeded"] is False
     assert status["request_unavailable"] is True
+    assert status["request_retryable"] is False
     assert "reviewer not found" in status["request_error"]
     assert state["copilot_review"]["request_unavailable"] is True
+
+
+def test_request_copilot_review_allows_retry_after_transient_error(monkeypatch):
+    pr = sample_pr()
+    state = {}
+
+    def fake_gh_text(args, repo=None):
+        raise gh_pr_watch.GhCommandError("network timeout")
+
+    monkeypatch.setattr(gh_pr_watch, "gh_text", fake_gh_text)
+
+    status = gh_pr_watch.request_copilot_review_if_possible(
+        pr,
+        state,
+        {"users": [], "teams": []},
+    )
+
+    assert status["request_attempted"] is True
+    assert status["request_succeeded"] is False
+    assert status["request_unavailable"] is False
+    assert status["request_retryable"] is True
+    assert "network timeout" in status["request_error"]
+    assert state["copilot_review"]["request_attempted"] is False
+    assert state["copilot_review"]["request_retryable"] is True
 
 
 def test_request_copilot_review_tolerates_failed_followup_status(monkeypatch):
