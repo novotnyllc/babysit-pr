@@ -33,11 +33,25 @@ REVIEW_BOT_LOGIN_KEYWORDS = {
 REVIEW_AUTOMATION_LOGINS = {
     "bugbot",
     "claude",
+    "copilot",
     "copilot-pull-request-reviewer",
     "coderabbitai",
     "cursor",
     "gemini-code-assist",
     "sourcery-ai",
+}
+COPILOT_REVIEW_REQUEST_LOGIN = "@copilot"
+COPILOT_REVIEW_DISPLAY_LOGIN = "Copilot"
+COPILOT_REVIEWER_LOGINS = {
+    "copilot",
+    "copilot-pull-request-reviewer",
+}
+COPILOT_REVIEW_REQUEST_RETRY_SECONDS = 300
+PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS = {
+    "could not resolve to a user",
+    "not a collaborator",
+    "review cannot be requested",
+    "reviewer not found",
 }
 TRUSTED_AUTHOR_ASSOCIATIONS = {
     "OWNER",
@@ -244,6 +258,7 @@ def load_state(path):
         "seen_issue_comment_ids": [],
         "seen_review_comment_ids": [],
         "seen_review_ids": [],
+        "copilot_review": {},
         "last_snapshot_at": None,
     }, True
 
@@ -276,7 +291,12 @@ def get_pr_checks(pr_spec, repo):
     if parsed["value"] is not None:
         cmd.append(parsed["value"])
     cmd.extend(["--json", checks_fields()])
-    data = gh_json(cmd, repo=repo)
+    try:
+        data = gh_json(cmd, repo=repo)
+    except GhCommandError as err:
+        if "no checks reported" in str(err).lower():
+            return []
+        raise
     if data is None:
         return []
     if not isinstance(data, list):
@@ -352,6 +372,20 @@ def get_authenticated_login():
     if not isinstance(data, dict) or not data.get("login"):
         raise GhCommandError("Unable to determine authenticated GitHub login from `gh api user`")
     return str(data["login"])
+
+
+def get_requested_reviewers(repo, pr_number):
+    data = gh_json(["api", f"repos/{repo}/pulls/{pr_number}/requested_reviewers"], repo=repo)
+    if not isinstance(data, dict):
+        raise GhCommandError("Unexpected requested reviewers payload from GitHub API")
+    return data
+
+
+def get_requested_reviewers_best_effort(repo, pr_number):
+    try:
+        return get_requested_reviewers(repo, pr_number), None
+    except GhCommandError as err:
+        return {"users": [], "teams": []}, str(err)
 
 
 def comment_endpoints(repo, pr_number):
@@ -466,6 +500,232 @@ def is_actionable_review_bot_login(login):
     return any(keyword in lower_login for keyword in REVIEW_BOT_LOGIN_KEYWORDS)
 
 
+def is_copilot_reviewer_login(login):
+    normalized_login = str(login or "").lower().removesuffix("[bot]")
+    return normalized_login in COPILOT_REVIEWER_LOGINS
+
+
+def requested_reviewer_logins(requested_reviewers):
+    if not isinstance(requested_reviewers, dict):
+        return []
+    users = requested_reviewers.get("users") or []
+    if not isinstance(users, list):
+        return []
+    return [
+        str(user.get("login") or "")
+        for user in users
+        if isinstance(user, dict) and user.get("login")
+    ]
+
+
+def has_pending_copilot_review(requested_reviewers):
+    return any(is_copilot_reviewer_login(login) for login in requested_reviewer_logins(requested_reviewers))
+
+
+def is_copilot_review_pending_or_unknown(copilot_review):
+    if not copilot_review:
+        return False
+    return bool(copilot_review.get("pending") or copilot_review.get("pending_unknown"))
+
+
+def is_permanent_copilot_request_error(message):
+    lower_message = str(message or "").lower()
+    return any(
+        keyword in lower_message
+        for keyword in PERMANENT_COPILOT_REVIEW_REQUEST_ERROR_KEYWORDS
+    )
+
+
+def _copilot_review_state_for_sha(state, head_sha):
+    record = state.get("copilot_review")
+    if not isinstance(record, dict):
+        return {}
+    if str(record.get("head_sha") or "") != str(head_sha or ""):
+        return {}
+    return record
+
+
+def _set_copilot_review_state(state, head_sha, **updates):
+    record = {
+        "head_sha": head_sha,
+        "request_attempted": False,
+        "request_succeeded": False,
+        "request_unavailable": False,
+        "request_retryable": False,
+        "request_error": None,
+        "last_request_attempt_at": None,
+        "request_retry_after": None,
+    }
+    current = state.get("copilot_review")
+    if isinstance(current, dict) and str(current.get("head_sha") or "") == str(head_sha or ""):
+        record.update(current)
+    record.update(updates)
+    state["copilot_review"] = record
+    return record
+
+
+def request_copilot_review_if_possible(pr, state, requested_reviewers):
+    head_sha = pr.get("head_sha") or ""
+    existing = _copilot_review_state_for_sha(state, head_sha)
+    pending = has_pending_copilot_review(requested_reviewers)
+
+    status = {
+        "requester": COPILOT_REVIEW_REQUEST_LOGIN,
+        "requested_reviewer": COPILOT_REVIEW_DISPLAY_LOGIN,
+        "request_attempted": bool(existing.get("request_attempted")),
+        "request_succeeded": bool(existing.get("request_succeeded")),
+        "request_unavailable": bool(existing.get("request_unavailable")),
+        "request_retryable": bool(existing.get("request_retryable")),
+        "request_error": existing.get("request_error"),
+        "last_request_attempt_at": existing.get("last_request_attempt_at"),
+        "request_retry_after": existing.get("request_retry_after"),
+        "requested_reviewers_confirmed": False,
+        "pending_unknown": False,
+        "pending": pending,
+        "requested_reviewer_logins": requested_reviewer_logins(requested_reviewers),
+    }
+
+    if pr["closed"] or pr["merged"] or not head_sha:
+        return status
+
+    if pending:
+        _set_copilot_review_state(
+            state,
+            head_sha,
+            request_attempted=True,
+            request_succeeded=True,
+            request_unavailable=False,
+            request_retryable=False,
+            request_error=None,
+            last_request_attempt_at=None,
+            request_retry_after=None,
+        )
+        status.update(
+            {
+                "request_attempted": True,
+                "request_succeeded": True,
+                "request_unavailable": False,
+                "request_retryable": False,
+                "request_error": None,
+                "last_request_attempt_at": None,
+                "request_retry_after": None,
+                "requested_reviewers_confirmed": True,
+            }
+        )
+        return status
+
+    if status["request_attempted"]:
+        return status
+
+    retry_after = status.get("request_retry_after")
+    try:
+        retry_after = int(retry_after)
+    except (TypeError, ValueError):
+        retry_after = 0
+    if status["request_retryable"] and retry_after > int(time.time()):
+        status["pending_unknown"] = True
+        return status
+
+    attempted_at = int(time.time())
+    try:
+        gh_text(
+            ["pr", "edit", str(pr["number"]), "--add-reviewer", COPILOT_REVIEW_REQUEST_LOGIN],
+            repo=pr["repo"],
+        )
+    except GhCommandError as err:
+        permanent_failure = is_permanent_copilot_request_error(str(err))
+        _set_copilot_review_state(
+            state,
+            head_sha,
+            request_attempted=permanent_failure,
+            request_succeeded=False,
+            request_unavailable=permanent_failure,
+            request_retryable=not permanent_failure,
+            request_error=str(err),
+            last_request_attempt_at=attempted_at,
+            request_retry_after=(
+                None
+                if permanent_failure
+                else attempted_at + COPILOT_REVIEW_REQUEST_RETRY_SECONDS
+            ),
+        )
+        status.update(
+            {
+                "request_attempted": True,
+                "request_succeeded": False,
+                "request_unavailable": permanent_failure,
+                "request_retryable": not permanent_failure,
+                "request_error": str(err),
+                "last_request_attempt_at": attempted_at,
+                "request_retry_after": (
+                    None
+                    if permanent_failure
+                    else attempted_at + COPILOT_REVIEW_REQUEST_RETRY_SECONDS
+                ),
+                "pending_unknown": not permanent_failure,
+            }
+        )
+        return status
+
+    try:
+        updated_requested_reviewers = get_requested_reviewers(pr["repo"], pr["number"])
+    except GhCommandError as err:
+        _set_copilot_review_state(
+            state,
+            head_sha,
+            request_attempted=True,
+            request_succeeded=True,
+            request_unavailable=False,
+            request_retryable=False,
+            request_error=str(err),
+            last_request_attempt_at=attempted_at,
+            request_retry_after=None,
+        )
+        status.update(
+            {
+                "request_attempted": True,
+                "request_succeeded": True,
+                "request_unavailable": False,
+                "request_retryable": False,
+                "request_error": str(err),
+                "last_request_attempt_at": attempted_at,
+                "request_retry_after": None,
+                "pending": False,
+                "pending_unknown": True,
+                "requested_reviewers_confirmed": False,
+            }
+        )
+        return status
+
+    updated_pending = has_pending_copilot_review(updated_requested_reviewers)
+    _set_copilot_review_state(
+        state,
+        head_sha,
+        request_attempted=True,
+        request_succeeded=True,
+        request_unavailable=False,
+        request_retryable=False,
+        request_error=None,
+        last_request_attempt_at=attempted_at,
+        request_retry_after=None,
+    )
+    status.update(
+        {
+            "request_attempted": True,
+            "request_succeeded": True,
+            "request_unavailable": False,
+            "request_retryable": False,
+            "request_error": None,
+            "last_request_attempt_at": attempted_at,
+            "request_retry_after": None,
+            "pending": updated_pending,
+            "requested_reviewers_confirmed": True,
+            "requested_reviewer_logins": requested_reviewer_logins(updated_requested_reviewers),
+        }
+    )
+    return status
+
+
 def is_trusted_human_review_author(item, authenticated_login):
     author = str(item.get("author") or "")
     if not author:
@@ -561,8 +821,10 @@ def unique_actions(actions):
     return out
 
 
-def is_pr_ready_to_merge(pr, checks_summary, new_review_items):
+def is_pr_ready_to_merge(pr, checks_summary, new_review_items, copilot_review=None):
     if pr["closed"] or pr["merged"]:
+        return False
+    if is_copilot_review_pending_or_unknown(copilot_review):
         return False
     if not checks_summary["all_terminal"]:
         return False
@@ -579,7 +841,15 @@ def is_pr_ready_to_merge(pr, checks_summary, new_review_items):
     return True
 
 
-def recommend_actions(pr, checks_summary, failed_runs, new_review_items, retries_used, max_retries):
+def recommend_actions(
+    pr,
+    checks_summary,
+    failed_runs,
+    new_review_items,
+    retries_used,
+    max_retries,
+    copilot_review=None,
+):
     actions = []
     if pr["closed"] or pr["merged"]:
         if new_review_items:
@@ -587,12 +857,15 @@ def recommend_actions(pr, checks_summary, failed_runs, new_review_items, retries
         actions.append("stop_pr_closed")
         return unique_actions(actions)
 
-    if is_pr_ready_to_merge(pr, checks_summary, new_review_items):
+    if is_pr_ready_to_merge(pr, checks_summary, new_review_items, copilot_review=copilot_review):
         actions.append("ready_to_merge")
         return unique_actions(actions)
 
     if new_review_items:
         actions.append("process_review_comment")
+
+    if is_copilot_review_pending_or_unknown(copilot_review):
+        actions.append("wait_for_copilot_review")
 
     has_failed_pr_checks = checks_summary["failed_count"] > 0
     if has_failed_pr_checks:
@@ -616,6 +889,30 @@ def collect_snapshot(args):
     if not state.get("started_at"):
         state["started_at"] = int(time.time())
 
+    prior_copilot_review = _copilot_review_state_for_sha(state, pr["head_sha"])
+    requested_reviewers, requested_reviewers_error = get_requested_reviewers_best_effort(
+        pr["repo"],
+        pr["number"],
+    )
+    copilot_review = request_copilot_review_if_possible(pr, state, requested_reviewers)
+    if requested_reviewers_error:
+        copilot_review["requested_reviewers_error"] = requested_reviewers_error
+        previously_requested_for_sha = bool(
+            copilot_review.get("request_succeeded")
+            or prior_copilot_review.get("request_succeeded")
+            or (
+                prior_copilot_review.get("request_attempted")
+                and not prior_copilot_review.get("request_unavailable")
+            )
+        )
+        if (
+            not copilot_review.get("pending")
+            and not copilot_review.get("requested_reviewers_confirmed")
+            and previously_requested_for_sha
+        ):
+            copilot_review["pending_unknown"] = True
+    elif not copilot_review.get("pending_unknown"):
+        copilot_review["requested_reviewers_confirmed"] = True
     authenticated_login = get_authenticated_login()
     new_review_items = fetch_new_review_items(
         pr,
@@ -641,6 +938,7 @@ def collect_snapshot(args):
         new_review_items,
         retries_used,
         args.max_flaky_retries,
+        copilot_review=copilot_review,
     )
 
     state["pr"] = {"repo": pr["repo"], "number": pr["number"]}
@@ -651,6 +949,7 @@ def collect_snapshot(args):
     snapshot = {
         "pr": pr,
         "checks": checks_summary,
+        "copilot_review": copilot_review,
         "failed_runs": failed_runs,
         "new_review_items": new_review_items,
         "actions": actions,
@@ -739,6 +1038,7 @@ def snapshot_change_key(snapshot):
     pr = snapshot.get("pr") or {}
     checks = snapshot.get("checks") or {}
     review_items = snapshot.get("new_review_items") or []
+    copilot_review = snapshot.get("copilot_review") or {}
     return (
         str(pr.get("head_sha") or ""),
         str(pr.get("state") or ""),
@@ -748,6 +1048,9 @@ def snapshot_change_key(snapshot):
         int(checks.get("passed_count") or 0),
         int(checks.get("failed_count") or 0),
         int(checks.get("pending_count") or 0),
+        bool(copilot_review.get("pending")),
+        bool(copilot_review.get("request_succeeded")),
+        bool(copilot_review.get("request_unavailable")),
         tuple(
             (str(item.get("kind") or ""), str(item.get("id") or ""))
             for item in review_items

@@ -14,6 +14,12 @@ Used to resolve PR number, URL, branch, head SHA, and closed/merged state.
 
 Used to compute pending/failed/passed counts and whether the current CI round is terminal.
 
+### Request Copilot review
+
+- `gh pr edit <pr_number> --add-reviewer @copilot`
+
+Used as a best-effort Copilot review request. Failure is allowed because Copilot review may not be enabled or requestable in every user/repo.
+
 ### Workflow runs for head SHA
 
 - `gh api repos/{owner}/{repo}/actions/runs -X GET -f head_sha=<sha> -f per_page=100`
@@ -41,6 +47,10 @@ Reruns only failed jobs (and dependencies) for a workflow run.
   - `gh api repos/{owner}/{repo}/pulls/<pr_number>/comments?per_page=100`
 - Review submissions:
   - `gh api repos/{owner}/{repo}/pulls/<pr_number>/reviews?per_page=100`
+- Requested reviewers:
+  - `gh api repos/{owner}/{repo}/pulls/<pr_number>/requested_reviewers`
+
+If requested reviewers includes a Copilot reviewer login, treat Copilot review as requested/in progress and keep polling before merge. Matching is case-insensitive and also recognizes `copilot-pull-request-reviewer[bot]` after stripping an optional `[bot]` suffix, not just `Copilot`.
 
 ## JSON fields consumed by the watcher
 
@@ -70,3 +80,7 @@ Reruns only failed jobs (and dependencies) for a workflow run.
 - `conclusion`
 - `html_url`
 - `head_sha`
+
+### Requested reviewers API
+
+- `users[].login`

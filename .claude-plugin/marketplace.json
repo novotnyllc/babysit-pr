@@ -11,7 +11,7 @@
     {
       "name": "babysit-pr",
       "description": "Watch GitHub pull requests for review comments, CI failures, and mergeability changes.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "author": {
         "name": "Claire Novotny LLC",
         "url": "https://github.com/novotnyllc"
