@@ -16,7 +16,7 @@ Used to compute pending/failed/passed counts and whether the current CI round is
 
 ### Request Copilot review
 
-- `gh pr edit <pr_number> --add-reviewer Copilot`
+- `gh pr edit <pr_number> --add-reviewer @copilot`
 
 Used as a best-effort Copilot review request. Failure is allowed because Copilot review may not be enabled or requestable in every user/repo.
 

@@ -42,7 +42,8 @@ def sample_checks(**overrides):
 
 def sample_copilot_review(**overrides):
     review = {
-        "requester": "Copilot",
+        "requester": "@copilot",
+        "requested_reviewer": "Copilot",
         "request_attempted": True,
         "request_succeeded": True,
         "request_unavailable": False,
@@ -189,7 +190,7 @@ def test_request_copilot_review_records_success_and_pending_reviewer(monkeypatch
     )
 
     assert calls == [
-        (["pr", "edit", "123", "--add-reviewer", "Copilot"], "openai/codex")
+        (["pr", "edit", "123", "--add-reviewer", "@copilot"], "openai/codex")
     ]
     assert status["request_attempted"] is True
     assert status["request_succeeded"] is True

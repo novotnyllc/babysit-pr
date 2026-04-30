@@ -25,7 +25,7 @@ Accept any of the following:
 
 1. When the user asks to "monitor"/"watch"/"babysit" a PR, start with the watcher's continuous mode (`--watch`) unless you are intentionally doing a one-shot diagnostic snapshot.
 2. Run the watcher script to snapshot PR/review/CI state (or consume each streamed snapshot from `--watch`).
-3. Let the watcher request a Copilot review when GitHub accepts it. Copilot may be unavailable for the repo/user; that is non-fatal and should not block the PR by itself.
+3. Let the watcher request a Copilot review with GitHub CLI's `@copilot` reviewer value when GitHub accepts it. Copilot may be unavailable for the repo/user; that is non-fatal and should not block the PR by itself.
 4. If `wait_for_copilot_review` is present, do not merge yet. Continue polling until the Copilot requested reviewer is gone, then inspect any newly surfaced Copilot feedback before proceeding.
 5. Inspect the `actions` list in the JSON response.
 6. If `diagnose_ci_failure` is present, inspect failed run logs and classify the failure.

@@ -39,7 +39,8 @@ REVIEW_AUTOMATION_LOGINS = {
     "gemini-code-assist",
     "sourcery-ai",
 }
-COPILOT_REVIEW_REQUEST_LOGIN = "Copilot"
+COPILOT_REVIEW_REQUEST_LOGIN = "@copilot"
+COPILOT_REVIEW_DISPLAY_LOGIN = "Copilot"
 COPILOT_REVIEWER_LOGINS = {
     "copilot",
     "copilot-pull-request-reviewer",
@@ -538,6 +539,7 @@ def request_copilot_review_if_possible(pr, state, requested_reviewers):
 
     status = {
         "requester": COPILOT_REVIEW_REQUEST_LOGIN,
+        "requested_reviewer": COPILOT_REVIEW_DISPLAY_LOGIN,
         "request_attempted": bool(existing.get("request_attempted")),
         "request_succeeded": bool(existing.get("request_succeeded")),
         "request_unavailable": bool(existing.get("request_unavailable")),
