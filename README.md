@@ -27,10 +27,11 @@ python3 scripts/sync_upstream.py --check
 
 ## Install
 
-Codex can add this repository as a plugin marketplace:
+Codex installs from the shared Claire Novotny LLC plugin marketplace:
 
 ```bash
-codex plugin marketplace add novotnyllc/babysit-pr
+codex plugin marketplace add novotnyllc/marketplace
+codex plugin add babysit-pr --marketplace novotnyllc
 ```
 
 Claude Code can add the same repository as a marketplace and install the plugin:
